@@ -15,8 +15,8 @@ int main(int argc, char * const argv[]) {
     double p = .037, gamma = .0001;
     std::string const experiment = "con4";
 #else // default: mnist
-    int clauses = 500, threshold = 20, epochs = 400;
-    double p = .075, gamma = .002;
+    int clauses = 500, threshold = 25, epochs = 400;
+    double p = .085, gamma = .0025;
     std::string const experiment = "mnist";
 #endif
 

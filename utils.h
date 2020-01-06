@@ -134,7 +134,7 @@ void fit(std::string const &experiment, int clauses, double p, double gamma, int
     sample_data(x_train, y_train, x_tray, y_tray, x_test->rows / 4);
 
     char mname[100];
-    sprintf(mname, "results/%s-c%04d-p%04d-g%04d-t%04d.machine", experiment.c_str(), clauses / 10, (int) round(p * 10000 + .0001), (int) round(gamma * 10000 + .0001), threshold);
+    sprintf(mname, "results/%s-c%05d-p%04d-g%05d-t%04d.machine", experiment.c_str(), clauses, (int) round(p * 10000 + .0001), (int) round(gamma * 100000 + .0001), threshold);
 
     multiweightm *wtm = nullptr;
     if (resume) { // deserializing machine
@@ -148,7 +148,7 @@ void fit(std::string const &experiment, int clauses, double p, double gamma, int
     if (!wtm)
         wtm = new multiweightm(classes, features, clauses, p, gamma, threshold);
 
-    printf("samples=%dK - features=%d, clauses=%d, p=%.4f, gamma=%.4f, threshold=%d\n", x_train->rows / 1000, features, clauses, p, gamma, threshold);
+    printf("samples=%dK, features=%d, classes=%d - clauses=%d, p=%.4f, gamma=%.5f, threshold=%d\n", x_train->rows / 1000, features, classes, clauses, p, gamma, threshold);
 
     while (wtm->get_epoch() < epochs) {
         clock_t c0 = clock();

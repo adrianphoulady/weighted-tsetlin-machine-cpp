@@ -22,126 +22,121 @@ T get(std::istream &is) {
 }
 
 class weightm {
-
-    int const literals;
-    int const clauses;
-    double const p;
-    double const gamma;
-    int const threshold;
-    int const state_bits;
-    int const literal_words;
-    word const literal_mask;
-    array3d<word> state;
-    array1d<word> feedback_mask;
-    array1d<int> clause;
-    array1d<double> weight;
+    int const features;     // number of features
+    int const clauses;      // number of clauses
+    double const p;         // setter feedback probability
+    double const gamma;     // weight learning rate
+    int const threshold;    // weighted sum threshold for learning toward
+    int const states;       // number of bits of states
+    int const literals;     // number of words containing all literals
+    word const actmask;     // mask for zeroing the remaining action bits in literal words
+    array3d<word> state;    // state of all clauses in [clause, literals, bit] order
+    array1d<word> lmask;    // feedback mask for reward and penalty in setter feedback
+    array1d<int> clause;    // value of clauses
+    array1d<double> weight; // weight associated to each clause
 
     // increase the states of the automata
-    void add(word *feature, word addend) {
-        for (int b = 0; addend && b < state_bits; ++b) {
-            feature[b] ^= addend;
-            addend &= feature[b] ^ addend;
+    void add(word *state_word, word addend) {
+        for (int b = 0; addend && b < states; ++b) {
+            state_word[b] ^= addend;
+            addend &= state_word[b] ^ addend;
         }
         if (addend)
-            for (int b = 0; b < state_bits; ++b)
-                feature[b] ^= addend;
+            for (int b = 0; b < states; ++b)
+                state_word[b] ^= addend;
     }
 
     // decrease the states of the automata
-    void subtract(word *feature, word subtrahend) {
-        for (int b = 0; subtrahend && b < state_bits; ++b) {
-            feature[b] ^= subtrahend;
-            subtrahend &= ~(feature[b] ^ subtrahend);
+    void subtract(word *state_word, word subtrahend) {
+        for (int b = 0; subtrahend && b < states; ++b) {
+            state_word[b] ^= subtrahend;
+            subtrahend &= ~(state_word[b] ^ subtrahend);
         }
         if (subtrahend)
-            for (int b = 0; b < state_bits; ++b)
-                feature[b] ^= subtrahend;
+            for (int b = 0; b < states; ++b)
+                state_word[b] ^= subtrahend;
     }
 
     // prepare the feedback mask with probability p for reward and penalty in the setter feedback
-    void prepare_mask() {
-        int flips = binomial(p, literals);
-        bool const target = flips <= literals / 2;
-        // if flips is more than half, do it the other way; make 0s in an all-1 sequence
+    void literal_mask() {
+        int n = features << 1, flips = binomial(p, n);
+        bool const target = flips <= features;
+        // if flips are more than half, do it the other way; make 0s in an all-1 sequence
         if (!target)
-            flips = literals - flips;
-        std::fill(&feedback_mask(0), &feedback_mask(literal_words), target - 1);
+            flips = n - flips;
+        std::fill(&lmask(0), &lmask(literals), target - 1);
         while (flips) {
-            auto l = fastrandrange(literals), w = l / word_bits, b = l % word_bits;
-            // might be one or two machine instructions less if we had done it in two separate loops for target 0 and target 1
-            if ((feedback_mask(w) >> b & 1) == target)
+            auto l = fastrandrange(n), w = l / word_bits, b = l % word_bits;
+            if ((lmask(w) >> b & 1) == target)
                 continue;
-            feedback_mask(w) ^= (word) 1 << b;
+            lmask(w) ^= (word) 1 << b;
             --flips;
         }
     }
 
     // setter feedback or feedback type I
     void setter(int c, word const *x) {
-        prepare_mask();
+        literal_mask();
         if (clause(c)) {
             weight(c) *= 1 + gamma;
-            for (int l = 0; l < literal_words; ++l) {
+            for (int l = 0; l < literals; ++l) {
                 add(state(c, l), x[l]);
-                subtract(state(c, l), feedback_mask(l) & ~x[l]);
+                subtract(state(c, l), lmask(l) & ~x[l]);
             }
         }
         else
-            for (int l = 0; l < literal_words; ++l)
-                subtract(state(c, l), feedback_mask(l));
+            for (int l = 0; l < literals; ++l)
+                subtract(state(c, l), lmask(l));
     }
 
     // clearer feedback or feedback type II
     void clearer(int c, word const *x) {
         if (clause(c)) {
             weight(c) /= 1 + gamma;
-            for (int l = 0; l < literal_words; ++l)
-                add(state(c, l), ~state(c, l, state_bits - 1) & ~x[l]);
+            for (int l = 0; l < literals; ++l)
+                add(state(c, l), ~state(c, l, states - 1) & ~x[l]);
         }
     }
 
     // value of a clause for an input
     // discard empty clauses instead of having them with value 1 for training == false
-    double value(int c, word const *x, bool training = false) {
+    int value(int c, word const *x, bool training = false) {
         word active = 0;
-        state(c, literal_words - 1, state_bits - 1) &= literal_mask;
-        clause(c) = 1;
-        for (int i = 0; i < literal_words; ++i) {
-            // bit (state_bits - 1) is the action bit of the automata
-            auto s = state(c, i, state_bits - 1);
-            if ((s & x[i]) != s)
+        state(c, literals, -1) &= actmask; // == state(c, literals - 1, states - 1)
+        for (int l = 0; l < literals; ++l) {
+            auto s = state(c, l, states - 1); // bit (states - 1) is the action bit of the automata
+            if ((s & x[l]) != s)
                 return clause(c) = 0;
             active |= s;
         }
-        if (training || active)
-            return weight(c);
-        return clause(c) = 0;
+        return clause(c) = training || active;
     }
+
 
 public:
 
     // constructor
-    weightm(int features, int clauses, double p, double gamma, int threshold, int state_bits = 8)
-    : literals{2 * features},
-    clauses{clauses},
-    p{p},
-    gamma{gamma},
-    threshold{threshold},
-    state_bits{state_bits},
-    literal_words{(literals - 1) / word_bits + 1},
-    literal_mask{~((bool) (literals % word_bits) * ~((word) 0) << literals % word_bits)},
-    state{clauses, literal_words, state_bits},
-    feedback_mask{literal_words},
-    clause{clauses},
-    weight{clauses} {
+    weightm(int features, int clauses, double p, double gamma, int threshold, int states = 8)
+    : features{features},
+      clauses{clauses},
+      p{p},
+      gamma{gamma},
+      threshold{threshold},
+      states{states},
+      literals{(2 * features - 1) / word_bits + 1},
+      actmask{~((bool) (2 * features % word_bits) * ~((word) 0) << 2 * features % word_bits)},
+      state{clauses, literals, states},
+      lmask{literals},
+      clause{clauses},
+      weight{clauses} {
         for (int c = 0; c < clauses; ++c) {
             // even clauses are positive and and odds are negative
             weight(c) = c & 1? -1: +1;
-            // initialize all the states to 2^state_bits - 1
-            for (int l = 0; l < literal_words; ++l) {
-                for (int b = 0; b < state_bits - 1; ++b)
+            // initialize all the states to 2^states - 1
+            for (int l = 0; l < literals; ++l) {
+                for (int b = 0; b < states - 1; ++b)
                     state(c, l, b) = ~((word) 0);
-                state(c, l, state_bits - 1) = 0;
+                state(c, l, states - 1) = 0;
             }
         }
     }
@@ -150,7 +145,8 @@ public:
     double infer(word const *x, bool training = false) {
         double inference = 0;
         for (int c = 0; c < clauses; ++c)
-            inference += value(c, x, training);
+            if (value(c, x, training))
+                inference += weight(c);
         return inference;
     }
 
@@ -188,16 +184,16 @@ public:
 
     // save the entire machine
     void serialize(std::ostream &os) {
-        put(os, literals);
+        put(os, features);
         put(os, clauses);
         put(os, p);
         put(os, gamma);
         put(os, threshold);
-        put(os, state_bits);
+        put(os, states);
         put(os, mcg_state);
         for (int c = 0; c < clauses; ++c)
-            for (int l = 0; l < literal_words; ++l)
-                for (int b = 0; b < state_bits; ++b)
+            for (int l = 0; l < literals; ++l)
+                for (int b = 0; b < states; ++b)
                     put(os, state(c, l, b));
         for (int c = 0; c < clauses; ++c)
             put(os, weight(c));
@@ -205,22 +201,22 @@ public:
 
     // deserialize; load the machine from an input stream
     explicit weightm(std::istream &is)
-    : literals{get<int>(is)},
-    clauses{get<int>(is)},
-    p{get<double>(is)},
-    gamma{get<double>(is)},
-    threshold{get<int>(is)},
-    state_bits{get<int>(is)},
-    literal_words{(literals - 1) / word_bits + 1},
-    literal_mask{~((bool) (literals % word_bits) * ~((word) 0) << literals % word_bits)},
-    state{clauses, literal_words, state_bits},
-    feedback_mask{literal_words},
-    clause{clauses},
-    weight{clauses} {
+    : features{get<int>(is)},
+      clauses{get<int>(is)},
+      p{get<double>(is)},
+      gamma{get<double>(is)},
+      threshold{get<int>(is)},
+      states{get<int>(is)},
+      literals{(2 * features - 1) / word_bits + 1},
+      actmask{~((bool) (2 * features % word_bits) * ~((word) 0) << 2 * features % word_bits)},
+      state{clauses, literals, states},
+      lmask{literals},
+      clause{clauses},
+      weight{clauses} {
         mcg_state = get<uint64_t>(is);
         for (int c = 0; c < clauses; ++c)
-            for (int l = 0; l < literal_words; ++l)
-                for (int b = 0; b < state_bits; ++b)
+            for (int l = 0; l < literals; ++l)
+                for (int b = 0; b < states; ++b)
                     state(c, l, b) = get<word>(is);
         for (int c = 0; c < clauses; ++c)
             weight(c) = get<double>(is);
