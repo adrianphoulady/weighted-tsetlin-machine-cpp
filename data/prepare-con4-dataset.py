@@ -1,6 +1,6 @@
 #
 #  Created by Adrian Phoulady on 12/6/19.
-#  © 2019 Adrian Phoulady.
+#  (c) 2019 Adrian Phoulady.
 #
 
 import csv
@@ -27,9 +27,10 @@ def binarize(sample):
 
 
 with open('connect-4.data') as f:
-    samples = [binarize(row) for row in csv.reader(f)]
+    samples = np.asarray([binarize(row) for row in csv.reader(f)])
 
-tests = len(samples) // 10
-random.Random(0).shuffle(samples)
-np.savetxt('con4-train.data', samples[: -tests], '%d')
-np.savetxt('con4-test.data', samples[-tests: ], '%d')
+test_percentage = 10
+indices = random.Random(0).sample(range(len(samples)), len(samples) // test_percentage)
+
+np.savetxt('con4-test.data', samples[indices], '%d')
+np.savetxt('con4-train.data', np.delete(samples, indices, 0), '%d')

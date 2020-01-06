@@ -1,6 +1,6 @@
 #
 #  Created by Adrian Phoulady on 12/6/19.
-#  © 2019 Adrian Phoulady.
+#  (c) 2019 Adrian Phoulady.
 #
 
 import numpy as np
